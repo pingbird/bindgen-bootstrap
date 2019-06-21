@@ -106,7 +106,7 @@ json dumpType(CXType type) {
         json out;
         out["kind"] = "Function";
         out["argTypes"] = args;
-        out["returnTypes"] = dumpType(clang_getResultType(type));
+        out["returnType"] = dumpType(clang_getResultType(type));
 
         if (clang_isFunctionTypeVariadic(type)) {
             out["varadic"] = true;
@@ -161,33 +161,47 @@ CXChildVisitResult typeVisitor(CXCursor cursor, CXCursor parent, CXClientData cl
     auto kind = clang_getCursorKind(cursor);
 
     CXFile file;
-    clang_getFileLocation(clang_getCursorLocation(cursor), &file, nullptr, nullptr, nullptr);
+    unsigned int line;
+    unsigned int col;
+    unsigned int offset;
+    clang_getFileLocation(clang_getCursorLocation(cursor), &file, &line, &col, &offset);
     auto fileName = ClangString(clang_getFileName(file)).str();
 
     if ((kind == CXCursor_ClassDecl || kind == CXCursor_StructDecl) && !isAnonymousType(cursor) && !isForwardDecl(cursor)) {
         auto type = clang_getCursorType(cursor);
         auto size = clang_Type_getSizeOf(type);
         auto name = getTypeSpelling(type);
-        auto& info = (*reinterpret_cast<json*>(client_data))["structs"][name];
-        info["size"] = size;
-        info["fields"] = json::array();
-        clang_visitChildren(cursor, fieldVisitor, reinterpret_cast<CXClientData>(&info["fields"]));
-        info["fileName"] = fileName;
+        auto& info = (*reinterpret_cast<json*>(client_data));
+        info["structs"][name]["size"] = size;
+        info["structs"][name]["fields"] = json::array();
+        clang_visitChildren(cursor, fieldVisitor, reinterpret_cast<CXClientData>(&info["structs"][name]["fields"]));
+        info["srcRefs"][name]["fileName"] = fileName;
+        info["srcRefs"][name]["line"] = line;
+        info["srcRefs"][name]["col"] = col;
+        info["srcRefs"][name]["offset"] = offset;
     } else if (kind == CXCursor_FunctionDecl) {
         auto type = clang_getCursorType(cursor);
         auto canType = clang_getCanonicalType(type);
         auto name = getCursorSpelling(cursor);
-        json& info = (*reinterpret_cast<json*>(client_data))["vars"];
-        info[name] = dumpType(canType);
-        info[name].erase("kind");
-        info[name]["fileName"] = fileName;
+        json& info = (*reinterpret_cast<json*>(client_data));
+        info["vars"][name] = dumpType(canType);
+        info["vars"][name].erase("kind");
+
+        info["srcRefs"][name]["fileName"] = fileName;
+        info["srcRefs"][name]["line"] = line;
+        info["srcRefs"][name]["col"] = col;
+        info["srcRefs"][name]["offset"] = offset;
     } else if (kind == CXCursor_EnumConstantDecl) {
         auto name = getCursorSpelling(cursor);
         auto type = clang_getCanonicalType(clang_getCursorType(cursor));
-        json& info = (*reinterpret_cast<json *>(client_data))["constants"][name];
-        info["type"] = dumpType(type);
-        info["value"] = clang_getEnumConstantDeclValue(cursor);
-        info["fileName"] = fileName;
+        json& info = (*reinterpret_cast<json *>(client_data));
+        info["constants"][name]["type"] = dumpType(type);
+        info["constants"][name]["value"] = clang_getEnumConstantDeclValue(cursor);
+
+        info["srcRefs"][name]["fileName"] = fileName;
+        info["srcRefs"][name]["line"] = line;
+        info["srcRefs"][name]["col"] = col;
+        info["srcRefs"][name]["offset"] = offset;
     } else if (kind == CXCursor_VarDecl) {
         auto type = clang_getCursorType(cursor);
         auto canType = clang_getCanonicalType(type);
@@ -205,11 +219,15 @@ CXChildVisitResult typeVisitor(CXCursor cursor, CXCursor parent, CXClientData cl
         } else success = false;
         clang_EvalResult_dispose(eval);
 
-        json& info = (*reinterpret_cast<json *>(client_data))["constants"][name];
+        json& info = (*reinterpret_cast<json *>(client_data));
         if (success) {
-            info["fileName"] = fileName;
-            info["type"] = dumpType(canType);
-            info["value"] = outValue;
+            info["constants"][name]["type"] = dumpType(canType);
+            info["constants"][name]["value"] = outValue;
+
+            info["srcRefs"][name]["fileName"] = fileName;
+            info["srcRefs"][name]["line"] = line;
+            info["srcRefs"][name]["col"] = col;
+            info["srcRefs"][name]["offset"] = offset;
         }
     }
 
